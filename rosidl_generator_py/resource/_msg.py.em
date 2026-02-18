@@ -491,6 +491,19 @@ if isinstance(member.type, (Array, AbstractSequence)):
                 ' please use a subclass of collections.abc.Sequence like list',
                 DeprecationWarning)
 @[  end if]@
+@# Buffer type dispatch for uint8[] fields must run unconditionally (not behind _check_fields)
+@# because it is a type dispatch, not a validation check.
+@[  if isinstance(member.type, AbstractNestedType) and isinstance(member.type.value_type, BasicType) and member.type.value_type.typename in SPECIAL_NESTED_BASIC_TYPES]@
+@[    if isinstance(member.type, AbstractSequence) and isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
+        try:
+            from rcl_buffer import Buffer as _RclBuffer
+            if isinstance(value, _RclBuffer):
+                self._@(member.name) = value
+                return
+        except ImportError:
+            pass
+@[    end if]@
+@[  end if]@
 @[  if isinstance(type_, NamespacedType)]@
 @[      if (
             type_.name.endswith(ACTION_GOAL_SUFFIX) or

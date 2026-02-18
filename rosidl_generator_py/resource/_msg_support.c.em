@@ -11,6 +11,7 @@ from rosidl_parser.definition import Array
 from rosidl_parser.definition import BasicType
 from rosidl_parser.definition import EMPTY_STRUCTURE_REQUIRED_MEMBER_NAME
 from rosidl_parser.definition import NamespacedType
+from rosidl_parser.definition import UnboundedSequence
 from rosidl_parser.definition import SERVICE_RESPONSE_MESSAGE_SUFFIX
 from rosidl_parser.definition import SERVICE_REQUEST_MESSAGE_SUFFIX
 
@@ -28,6 +29,14 @@ def primitive_msg_type_to_c(type_):
     return BASIC_IDL_TYPES_TO_C[type_.typename]
 
 
+# Check if this message has any uint8[] buffer fields
+has_buffer_fields = False
+for member in message.structure.members:
+    if isinstance(member.type, UnboundedSequence) and isinstance(member.type.value_type, BasicType) and member.type.value_type.typename == 'uint8':
+        has_buffer_fields = True
+        break
+
+
 include_parts = [package_name] + list(interface_path.parents[0].parts) + [
     'detail', convert_camel_case_to_lower_case_underscore(interface_path.stem)]
 include_base = '/'.join(include_parts)
@@ -40,6 +49,8 @@ header_files = [
     include_base + '__struct.h',
     include_base + '__functions.h',
 ]
+if has_buffer_fields:
+    header_files.append('stdint.h')
 }@
 @[for header_file in header_files]@
 @{
@@ -68,6 +79,15 @@ repeated_header_file = header_file in include_directives
 #endif
 @[    end if]@
 @[end for]@
+@[if has_buffer_fields]@
+
+// Sentinel value for buffer-backed uint8[] sequences.
+// When capacity == this value, the data pointer holds a borrowed rcl_buffer::Buffer<uint8_t>*
+// instead of a malloc'd byte array. SIZE_MAX can never occur from a real allocation.
+#ifndef RCL_BUFFER_SENTINEL_CAPACITY
+#define RCL_BUFFER_SENTINEL_CAPACITY ((size_t)-1)
+#endif
+@[end if]@
 
 @{
 have_not_included_primitive_arrays = True
@@ -250,6 +270,42 @@ nested_type = '__'.join(type_.namespaced_name())
 @[    end if]@
 @[  elif isinstance(member.type, AbstractNestedType)]@
 @[    if isinstance(member.type, AbstractSequence) and isinstance(member.type.value_type, BasicType)]@
+@[      if isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
+    // Check if the field is an rcl_buffer.Buffer with a non-CPU backend
+    {
+      PyObject * backend_attr = PyObject_GetAttrString(field, "backend_type");
+      if (backend_attr != NULL) {
+        const char * backend_str = PyUnicode_AsUTF8(backend_attr);
+        if (backend_str != NULL && strcmp(backend_str, "cpu") != 0) {
+          // Non-CPU backend: set buffer sentinel instead of copying data
+          PyObject * rcl_buffer_mod = PyImport_ImportModule("rcl_buffer._rcl_buffer_py");
+          if (rcl_buffer_mod != NULL) {
+            PyObject * get_ptr_func = PyObject_GetAttrString(rcl_buffer_mod, "_get_buffer_ptr");
+            if (get_ptr_func != NULL) {
+              PyObject * ptr_result = PyObject_CallFunctionObjArgs(get_ptr_func, field, NULL);
+              if (ptr_result != NULL) {
+                uintptr_t buffer_ptr = (uintptr_t)PyLong_AsUnsignedLongLong(ptr_result);
+                // Set sentinel: data = borrowed Buffer*, capacity = SIZE_MAX
+                ros_message->@(member.name).data = (uint8_t *)buffer_ptr;
+                ros_message->@(member.name).size = 0;
+                ros_message->@(member.name).capacity = RCL_BUFFER_SENTINEL_CAPACITY;
+                Py_DECREF(ptr_result);
+              }
+              Py_DECREF(get_ptr_func);
+            }
+            Py_DECREF(rcl_buffer_mod);
+          }
+          Py_DECREF(backend_attr);
+          Py_DECREF(field);
+          // Sentinel is set, skip normal conversion for this field
+          goto @(member.name)__done;
+        }
+        Py_DECREF(backend_attr);
+      } else {
+        PyErr_Clear();
+      }
+    }
+@[      end if]@
     if (PyObject_CheckBuffer(field)) {
       // Optimization for converting arrays of primitives
       Py_buffer view;
@@ -513,6 +569,10 @@ nested_type = '__'.join(type_.namespaced_name())
 @[  end if]@
     Py_DECREF(field);
   }
+@[  if isinstance(member.type, UnboundedSequence) and isinstance(member.type.value_type, BasicType) and member.type.value_type.typename == 'uint8']@
+@(member.name)__done:
+  ;
+@[  end if]@
 @[end for]@
 
   return true;
@@ -569,6 +629,40 @@ if isinstance(type_, AbstractNestedType):
     memcpy(dst, src, @(member.type.size) * sizeof(@primitive_msg_type_to_c(member.type.value_type)));
     Py_DECREF(field);
 @[    elif isinstance(member.type, AbstractSequence)]@
+@[      if isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
+    // Check for buffer sentinel: data holds an rcl_buffer::Buffer<uint8_t>*
+    if (ros_message->@(member.name).capacity == RCL_BUFFER_SENTINEL_CAPACITY) {
+      // The RMW deserialized into a vendor-backed buffer — wrap it in a Python Buffer.
+      // All C++ operations go through the rcl_buffer._rcl_buffer_py module since this
+      // file is compiled as C.
+      PyObject * rcl_buffer_internal = PyImport_ImportModule("rcl_buffer._rcl_buffer_py");
+      if (rcl_buffer_internal != NULL) {
+        PyObject * take_func = PyObject_GetAttrString(rcl_buffer_internal, "_take_buffer_from_ptr");
+        if (take_func != NULL) {
+          // Pass the raw pointer as a Python integer; _take_buffer_from_ptr takes ownership
+          PyObject * ptr_arg = PyLong_FromUnsignedLongLong(
+            (unsigned long long)(uintptr_t)ros_message->@(member.name).data);
+          field = PyObject_CallFunctionObjArgs(take_func, ptr_arg, NULL);
+          Py_XDECREF(ptr_arg);
+          Py_DECREF(take_func);
+        }
+        Py_DECREF(rcl_buffer_internal);
+      }
+      if (field == NULL) {
+        return NULL;
+      }
+      // Clear the sentinel so fini doesn't try to free the (now-owned) buffer pointer
+      ros_message->@(member.name).data = NULL;
+      ros_message->@(member.name).size = 0;
+      ros_message->@(member.name).capacity = 0;
+      // Set the Buffer on the Python message object
+      if (PyObject_SetAttrString(_pymessage, "@(member.name)", field) == -1) {
+        Py_DECREF(field);
+        return NULL;
+      }
+      Py_DECREF(field);
+    } else {
+@[      end if]@
     field = PyObject_GetAttrString(_pymessage, "@(member.name)");
     if (!field) {
       return NULL;
@@ -623,6 +717,9 @@ if isinstance(type_, AbstractNestedType):
       Py_DECREF(ret);
     }
     Py_DECREF(field);
+@[      if isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
+    }  // end else (non-sentinel path)
+@[      end if]@
 @[    end if]@
 @[ else]@
 @[  if isinstance(type_, NamespacedType)]@
