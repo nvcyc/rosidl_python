@@ -79,15 +79,7 @@ repeated_header_file = header_file in include_directives
 #endif
 @[    end if]@
 @[end for]@
-@[if has_buffer_fields]@
-
-// Sentinel value for buffer-backed uint8[] sequences.
-// When capacity == this value, the data pointer holds a borrowed rcl_buffer::Buffer<uint8_t>*
-// instead of a malloc'd byte array. SIZE_MAX can never occur from a real allocation.
-#ifndef RCL_BUFFER_SENTINEL_CAPACITY
-#define RCL_BUFFER_SENTINEL_CAPACITY ((size_t)-1)
-#endif
-@[end if]@
+@# Buffer-backed uint8[] fields use the is_rcl_buffer flag on the sequence struct.
 
 @{
 have_not_included_primitive_arrays = True
@@ -277,7 +269,7 @@ nested_type = '__'.join(type_.namespaced_name())
       if (backend_attr != NULL) {
         const char * backend_str = PyUnicode_AsUTF8(backend_attr);
         if (backend_str != NULL && strcmp(backend_str, "cpu") != 0) {
-          // Non-CPU backend: set buffer sentinel instead of copying data
+          // Non-CPU backend: set is_rcl_buffer flag instead of copying data
           PyObject * rcl_buffer_mod = PyImport_ImportModule("rcl_buffer._rcl_buffer_py");
           if (rcl_buffer_mod != NULL) {
             PyObject * get_ptr_func = PyObject_GetAttrString(rcl_buffer_mod, "_get_buffer_ptr");
@@ -285,10 +277,10 @@ nested_type = '__'.join(type_.namespaced_name())
               PyObject * ptr_result = PyObject_CallFunctionObjArgs(get_ptr_func, field, NULL);
               if (ptr_result != NULL) {
                 uintptr_t buffer_ptr = (uintptr_t)PyLong_AsUnsignedLongLong(ptr_result);
-                // Set sentinel: data = borrowed Buffer*, capacity = SIZE_MAX
                 ros_message->@(member.name).data = (uint8_t *)buffer_ptr;
                 ros_message->@(member.name).size = 0;
-                ros_message->@(member.name).capacity = RCL_BUFFER_SENTINEL_CAPACITY;
+                ros_message->@(member.name).capacity = 0;
+                ros_message->@(member.name).is_rcl_buffer = true;
                 Py_DECREF(ptr_result);
               }
               Py_DECREF(get_ptr_func);
@@ -630,8 +622,7 @@ if isinstance(type_, AbstractNestedType):
     Py_DECREF(field);
 @[    elif isinstance(member.type, AbstractSequence)]@
 @[      if isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
-    // Check for buffer sentinel: data holds an rcl_buffer::Buffer<uint8_t>*
-    if (ros_message->@(member.name).capacity == RCL_BUFFER_SENTINEL_CAPACITY) {
+    if (ros_message->@(member.name).is_rcl_buffer) {
       // The RMW deserialized into a vendor-backed buffer — wrap it in a Python Buffer.
       // All C++ operations go through the rcl_buffer._rcl_buffer_py module since this
       // file is compiled as C.
@@ -651,10 +642,10 @@ if isinstance(type_, AbstractNestedType):
       if (field == NULL) {
         return NULL;
       }
-      // Clear the sentinel so fini doesn't try to free the (now-owned) buffer pointer
       ros_message->@(member.name).data = NULL;
       ros_message->@(member.name).size = 0;
       ros_message->@(member.name).capacity = 0;
+      ros_message->@(member.name).is_rcl_buffer = false;
       // Set the Buffer on the Python message object
       if (PyObject_SetAttrString(_pymessage, "@(member.name)", field) == -1) {
         Py_DECREF(field);
@@ -718,7 +709,7 @@ if isinstance(type_, AbstractNestedType):
     }
     Py_DECREF(field);
 @[      if isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
-    }  // end else (non-sentinel path)
+    }  // end else (non-buffer path)
 @[      end if]@
 @[    end if]@
 @[ else]@
