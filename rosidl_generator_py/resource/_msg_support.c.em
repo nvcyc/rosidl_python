@@ -270,7 +270,7 @@ nested_type = '__'.join(type_.namespaced_name())
         const char * backend_str = PyUnicode_AsUTF8(backend_attr);
         if (backend_str != NULL && strcmp(backend_str, "cpu") != 0) {
           // Non-CPU backend: set is_rcl_buffer flag instead of copying data
-          PyObject * rcl_buffer_mod = PyImport_ImportModule("rcl_buffer._rcl_buffer_py");
+          PyObject * rcl_buffer_mod = PyImport_ImportModule("rcl_buffer");
           if (rcl_buffer_mod != NULL) {
             PyObject * get_ptr_func = PyObject_GetAttrString(rcl_buffer_mod, "_get_buffer_ptr");
             if (get_ptr_func != NULL) {
@@ -626,7 +626,7 @@ if isinstance(type_, AbstractNestedType):
       // The RMW deserialized into a vendor-backed buffer — wrap it in a Python Buffer.
       // All C++ operations go through the rcl_buffer._rcl_buffer_py module since this
       // file is compiled as C.
-      PyObject * rcl_buffer_internal = PyImport_ImportModule("rcl_buffer._rcl_buffer_py");
+      PyObject * rcl_buffer_internal = PyImport_ImportModule("rcl_buffer");
       if (rcl_buffer_internal != NULL) {
         PyObject * take_func = PyObject_GetAttrString(rcl_buffer_internal, "_take_buffer_from_ptr");
         if (take_func != NULL) {

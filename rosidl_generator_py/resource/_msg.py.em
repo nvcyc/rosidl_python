@@ -431,7 +431,7 @@ if isinstance(type_, AbstractNestedType):
                     fieldstr = '[]'
                 else:
                     if self._check_fields:
-                        assert fieldstr.startswith('array(')
+                        assert fieldstr.startswith('array(') or fieldstr.startswith('rcl_buffer')
                     prefix = "array('X', "
                     suffix = ')'
                     fieldstr = fieldstr[len(prefix):-len(suffix)]
@@ -497,7 +497,7 @@ if isinstance(member.type, (Array, AbstractSequence)):
 @[    if isinstance(member.type, AbstractSequence) and isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
         try:
             from rcl_buffer import Buffer as _RclBuffer
-            if isinstance(value, _RclBuffer):
+            if type(value) is _RclBuffer:
                 self._@(member.name) = value
                 return
         except ImportError:
