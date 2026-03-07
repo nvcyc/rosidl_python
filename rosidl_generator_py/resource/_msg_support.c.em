@@ -79,7 +79,7 @@ repeated_header_file = header_file in include_directives
 #endif
 @[    end if]@
 @[end for]@
-@# Buffer-backed uint8[] fields use the is_rcl_buffer flag on the sequence struct.
+@# Buffer-backed uint8[] fields use the is_rosidl_buffer flag on the sequence struct.
 
 @{
 have_not_included_primitive_arrays = True
@@ -263,16 +263,16 @@ nested_type = '__'.join(type_.namespaced_name())
 @[  elif isinstance(member.type, AbstractNestedType)]@
 @[    if isinstance(member.type, AbstractSequence) and isinstance(member.type.value_type, BasicType)]@
 @[      if isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
-    // Check if the field is an rcl_buffer.Buffer with a non-CPU backend
+    // Check if the field is an rosidl_buffer.Buffer with a non-CPU backend
     {
       PyObject * backend_attr = PyObject_GetAttrString(field, "backend_type");
       if (backend_attr != NULL) {
         const char * backend_str = PyUnicode_AsUTF8(backend_attr);
         if (backend_str != NULL && strcmp(backend_str, "cpu") != 0) {
-          // Non-CPU backend: set is_rcl_buffer flag instead of copying data
-          PyObject * rcl_buffer_mod = PyImport_ImportModule("rcl_buffer");
-          if (rcl_buffer_mod != NULL) {
-            PyObject * get_ptr_func = PyObject_GetAttrString(rcl_buffer_mod, "_get_buffer_ptr");
+          // Non-CPU backend: set is_rosidl_buffer flag instead of copying data
+          PyObject * rosidl_buffer_mod = PyImport_ImportModule("rosidl_buffer");
+          if (rosidl_buffer_mod != NULL) {
+            PyObject * get_ptr_func = PyObject_GetAttrString(rosidl_buffer_mod, "_get_buffer_ptr");
             if (get_ptr_func != NULL) {
               PyObject * ptr_result = PyObject_CallFunctionObjArgs(get_ptr_func, field, NULL);
               if (ptr_result != NULL) {
@@ -280,12 +280,12 @@ nested_type = '__'.join(type_.namespaced_name())
                 ros_message->@(member.name).data = (uint8_t *)buffer_ptr;
                 ros_message->@(member.name).size = 0;
                 ros_message->@(member.name).capacity = 0;
-                ros_message->@(member.name).is_rcl_buffer = true;
+                ros_message->@(member.name).is_rosidl_buffer = true;
                 Py_DECREF(ptr_result);
               }
               Py_DECREF(get_ptr_func);
             }
-            Py_DECREF(rcl_buffer_mod);
+            Py_DECREF(rosidl_buffer_mod);
           }
           Py_DECREF(backend_attr);
           Py_DECREF(field);
@@ -622,13 +622,13 @@ if isinstance(type_, AbstractNestedType):
     Py_DECREF(field);
 @[    elif isinstance(member.type, AbstractSequence)]@
 @[      if isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
-    if (ros_message->@(member.name).is_rcl_buffer) {
+    if (ros_message->@(member.name).is_rosidl_buffer) {
       // The RMW deserialized into a vendor-backed buffer — wrap it in a Python Buffer.
-      // All C++ operations go through the rcl_buffer._rcl_buffer_py module since this
+      // All C++ operations go through the rosidl_buffer._rosidl_buffer_py module since this
       // file is compiled as C.
-      PyObject * rcl_buffer_internal = PyImport_ImportModule("rcl_buffer");
-      if (rcl_buffer_internal != NULL) {
-        PyObject * take_func = PyObject_GetAttrString(rcl_buffer_internal, "_take_buffer_from_ptr");
+      PyObject * rosidl_buffer_internal = PyImport_ImportModule("rosidl_buffer");
+      if (rosidl_buffer_internal != NULL) {
+        PyObject * take_func = PyObject_GetAttrString(rosidl_buffer_internal, "_take_buffer_from_ptr");
         if (take_func != NULL) {
           // Pass the raw pointer as a Python integer; _take_buffer_from_ptr takes ownership
           PyObject * ptr_arg = PyLong_FromUnsignedLongLong(
@@ -637,7 +637,7 @@ if isinstance(type_, AbstractNestedType):
           Py_XDECREF(ptr_arg);
           Py_DECREF(take_func);
         }
-        Py_DECREF(rcl_buffer_internal);
+        Py_DECREF(rosidl_buffer_internal);
       }
       if (field == NULL) {
         return NULL;
@@ -645,7 +645,7 @@ if isinstance(type_, AbstractNestedType):
       ros_message->@(member.name).data = NULL;
       ros_message->@(member.name).size = 0;
       ros_message->@(member.name).capacity = 0;
-      ros_message->@(member.name).is_rcl_buffer = false;
+      ros_message->@(member.name).is_rosidl_buffer = false;
       // Set the Buffer on the Python message object
       if (PyObject_SetAttrString(_pymessage, "@(member.name)", field) == -1) {
         Py_DECREF(field);
