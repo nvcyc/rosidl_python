@@ -44,13 +44,15 @@ include_base = '/'.join(include_parts)
 header_files = [
     'Python.h',
     'stdbool.h',
+]
+if has_buffer_fields:
+    header_files.append('stdint.h')
+header_files += [
     'numpy/ndarrayobject.h',
     'rosidl_runtime_c/visibility_control.h',
     include_base + '__struct.h',
     include_base + '__functions.h',
 ]
-if has_buffer_fields:
-    header_files.append('stdint.h')
 }@
 @[for header_file in header_files]@
 @{
@@ -632,7 +634,7 @@ if isinstance(type_, AbstractNestedType):
         if (take_func != NULL) {
           // Pass the raw pointer as a Python integer; _take_buffer_from_ptr takes ownership
           PyObject * ptr_arg = PyLong_FromUnsignedLongLong(
-            (unsigned long long)(uintptr_t)ros_message->@(member.name).data);
+            (uint64_t)(uintptr_t)ros_message->@(member.name).data);
           field = PyObject_CallFunctionObjArgs(take_func, ptr_arg, NULL);
           Py_XDECREF(ptr_arg);
           Py_DECREF(take_func);
@@ -654,60 +656,61 @@ if isinstance(type_, AbstractNestedType):
       Py_DECREF(field);
     } else {
 @[      end if]@
-    field = PyObject_GetAttrString(_pymessage, "@(member.name)");
-    if (!field) {
-      return NULL;
-    }
-    assert(field->ob_type != NULL);
-    assert(field->ob_type->tp_name != NULL);
-    assert(strcmp(field->ob_type->tp_name, "array.array") == 0);
-    // ensure that itemsize matches the sizeof of the ROS message field
-    PyObject * itemsize_attr = PyObject_GetAttrString(field, "itemsize");
-    assert(itemsize_attr != NULL);
-    size_t itemsize = PyLong_AsSize_t(itemsize_attr);
-    Py_DECREF(itemsize_attr);
-    if (itemsize != sizeof(@primitive_msg_type_to_c(member.type.value_type))) {
-      PyErr_SetString(PyExc_RuntimeError, "itemsize doesn't match expectation");
-      Py_DECREF(field);
-      return NULL;
-    }
-    // clear the array, poor approach to remove potential default values
-    Py_ssize_t length = PyObject_Length(field);
-    if (-1 == length) {
-      Py_DECREF(field);
-      return NULL;
-    }
-    if (length > 0) {
-      PyObject * pop = PyObject_GetAttrString(field, "pop");
-      assert(pop != NULL);
-      for (Py_ssize_t i = 0; i < length; ++i) {
-        PyObject * ret = PyObject_CallFunctionObjArgs(pop, NULL);
-        if (!ret) {
-          Py_DECREF(pop);
-          Py_DECREF(field);
-          return NULL;
-        }
-        Py_DECREF(ret);
-      }
-      Py_DECREF(pop);
-    }
-    if (ros_message->@(member.name).size > 0) {
-      // populating the array.array using the frombytes method
-      PyObject * frombytes = PyObject_GetAttrString(field, "frombytes");
-      assert(frombytes != NULL);
-      @primitive_msg_type_to_c(member.type.value_type) * src = &(ros_message->@(member.name).data[0]);
-      PyObject * data = PyBytes_FromStringAndSize((const char *)src, ros_message->@(member.name).size * sizeof(@primitive_msg_type_to_c(member.type.value_type)));
-      assert(data != NULL);
-      PyObject * ret = PyObject_CallFunctionObjArgs(frombytes, data, NULL);
-      Py_DECREF(data);
-      Py_DECREF(frombytes);
-      if (!ret) {
-        Py_DECREF(field);
-        return NULL;
-      }
-      Py_DECREF(ret);
-    }
-    Py_DECREF(field);
+@{bi = '  ' if (isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8') else ''}@
+@(bi)    field = PyObject_GetAttrString(_pymessage, "@(member.name)");
+@(bi)    if (!field) {
+@(bi)      return NULL;
+@(bi)    }
+@(bi)    assert(field->ob_type != NULL);
+@(bi)    assert(field->ob_type->tp_name != NULL);
+@(bi)    assert(strcmp(field->ob_type->tp_name, "array.array") == 0);
+@(bi)    // ensure that itemsize matches the sizeof of the ROS message field
+@(bi)    PyObject * itemsize_attr = PyObject_GetAttrString(field, "itemsize");
+@(bi)    assert(itemsize_attr != NULL);
+@(bi)    size_t itemsize = PyLong_AsSize_t(itemsize_attr);
+@(bi)    Py_DECREF(itemsize_attr);
+@(bi)    if (itemsize != sizeof(@primitive_msg_type_to_c(member.type.value_type))) {
+@(bi)      PyErr_SetString(PyExc_RuntimeError, "itemsize doesn't match expectation");
+@(bi)      Py_DECREF(field);
+@(bi)      return NULL;
+@(bi)    }
+@(bi)    // clear the array, poor approach to remove potential default values
+@(bi)    Py_ssize_t length = PyObject_Length(field);
+@(bi)    if (-1 == length) {
+@(bi)      Py_DECREF(field);
+@(bi)      return NULL;
+@(bi)    }
+@(bi)    if (length > 0) {
+@(bi)      PyObject * pop = PyObject_GetAttrString(field, "pop");
+@(bi)      assert(pop != NULL);
+@(bi)      for (Py_ssize_t i = 0; i < length; ++i) {
+@(bi)        PyObject * ret = PyObject_CallFunctionObjArgs(pop, NULL);
+@(bi)        if (!ret) {
+@(bi)          Py_DECREF(pop);
+@(bi)          Py_DECREF(field);
+@(bi)          return NULL;
+@(bi)        }
+@(bi)        Py_DECREF(ret);
+@(bi)      }
+@(bi)      Py_DECREF(pop);
+@(bi)    }
+@(bi)    if (ros_message->@(member.name).size > 0) {
+@(bi)      // populating the array.array using the frombytes method
+@(bi)      PyObject * frombytes = PyObject_GetAttrString(field, "frombytes");
+@(bi)      assert(frombytes != NULL);
+@(bi)      @primitive_msg_type_to_c(member.type.value_type) * src = &(ros_message->@(member.name).data[0]);
+@(bi)      PyObject * data = PyBytes_FromStringAndSize((const char *)src, ros_message->@(member.name).size * sizeof(@primitive_msg_type_to_c(member.type.value_type)));
+@(bi)      assert(data != NULL);
+@(bi)      PyObject * ret = PyObject_CallFunctionObjArgs(frombytes, data, NULL);
+@(bi)      Py_DECREF(data);
+@(bi)      Py_DECREF(frombytes);
+@(bi)      if (!ret) {
+@(bi)        Py_DECREF(field);
+@(bi)        return NULL;
+@(bi)      }
+@(bi)      Py_DECREF(ret);
+@(bi)    }
+@(bi)    Py_DECREF(field);
 @[      if isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
     }  // end else (non-buffer path)
 @[      end if]@
