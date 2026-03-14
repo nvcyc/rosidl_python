@@ -430,11 +430,13 @@ if isinstance(type_, AbstractNestedType):
                 if len(field) == 0:
                     fieldstr = '[]'
                 else:
-                    if self._check_fields:
-                        assert fieldstr.startswith('array(') or fieldstr.startswith('rosidl_buffer')
-                    prefix = "array('X', "
-                    suffix = ')'
-                    fieldstr = fieldstr[len(prefix):-len(suffix)]
+                    from rosidl_buffer import Buffer as _RosidlBuffer
+                    if not isinstance(field, _RosidlBuffer):
+                        if self._check_fields:
+                            assert fieldstr.startswith('array(')
+                        prefix = "array('X', "
+                        suffix = ')'
+                        fieldstr = fieldstr[len(prefix):-len(suffix)]
             args.append(s + '=' + fieldstr)
         return '%s(%s)' % ('.'.join(typename), ', '.join(args))
 
@@ -495,13 +497,10 @@ if isinstance(member.type, (Array, AbstractSequence)):
 @# because it is a type dispatch, not a validation check.
 @[  if isinstance(member.type, AbstractNestedType) and isinstance(member.type.value_type, BasicType) and member.type.value_type.typename in SPECIAL_NESTED_BASIC_TYPES]@
 @[    if isinstance(member.type, AbstractSequence) and isinstance(member.type, UnboundedSequence) and member.type.value_type.typename == 'uint8']@
-        try:
-            from rosidl_buffer import Buffer as _RclBuffer
-            if type(value) is _RclBuffer:
-                self._@(member.name) = value
-                return
-        except ImportError:
-            pass
+        from rosidl_buffer import Buffer as _RosidlBuffer
+        if isinstance(value, _RosidlBuffer):
+            self._@(member.name) = value
+            return
 @[    end if]@
 @[  end if]@
 @[  if isinstance(type_, NamespacedType)]@
